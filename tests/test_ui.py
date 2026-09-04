@@ -161,12 +161,13 @@ def test_build_ui_constructs_without_server():
     demo = build_ui(Settings(_env_file=None))
     blocks = list(demo.blocks.values())
     labels = {getattr(b, "label", None) for b in blocks}
-    assert {"API base", "model", "等价 curl", "结果"} <= labels
-    assert any(str(label).startswith("请求参数") for label in labels)
-    assert any(str(label).startswith("响应元数据") for label in labels)
+    assert {"API base", "model", "Equivalent curl", "Results"} <= labels
+    assert any(str(label).startswith("Request (live") for label in labels)
+    assert any(str(label).startswith("Response metadata") for label in labels)
     buttons = [b.value for b in blocks if isinstance(b, gr.Button)]
-    assert buttons.count("取消") == 2
-    assert "发送到图生图" in buttons and "用选中结果继续编辑" in buttons
+    assert buttons.count("Cancel") == 2
+    assert "Send to Image to Image" in buttons
+    assert "Continue editing with selected result" in buttons
     assert "strength" in labels
     assert any(isinstance(b, gr.Tabs) for b in blocks)
     assert {t.id for t in blocks if isinstance(t, gr.Tab)} == {"generate", "edit", "status"}
@@ -346,7 +347,7 @@ def test_on_generate_yields_data_urls_and_on_send_decodes_them(monkeypatch):
 
     assert outs[0][0] == gr.skip() and len(outs[0]) == 3
     items, meta, status = outs[-1]
-    assert status.startswith("✅ 完成") and meta["done"] == 2
+    assert status.startswith("Done") and meta["done"] == 2
     assert isinstance(items, list) and all(isinstance(item, dict) for item in items)
     assert [item["caption"] for item in items] == ["seed=7", "seed=8"]
     for item in items:
@@ -400,7 +401,7 @@ def test_on_edit_uses_painted_mask_and_removes_temp_file(monkeypatch, tmp_path: 
 
         outs = list(on_edit("rid", API_BASE, MODEL, refs, editor, str(uploaded), 0, "p", *controls))
         assert len(written) == 1 and not os.path.exists(written[0])
-        assert outs[-1][2].startswith("✅ 完成")
+        assert outs[-1][2].startswith("Done")
         items = outs[-1][0]
         assert isinstance(items, list) and [type(item) for item in items] == [dict]
         assert items[0]["image"]["url"].startswith("data:image/png;base64,")
@@ -483,12 +484,12 @@ class TestStatusLine:
     def test_formats_health(self):
         health = {"status": "ok", "ready": True, "in_flight": 0, **FakeEngine().info()}
         assert status_line(health) == (
-            "**flux.2-klein-4b** · cpu · float32 · offload none · 默认 4 步 · 进行中 0"
+            "**flux.2-klein-4b** · cpu · float32 · offload none · default 4 steps · in flight 0"
         )
 
     def test_in_flight_and_missing_fields(self):
-        assert status_line({"model_id": "m", "in_flight": 2}) == "**m** · 进行中 2"
-        assert status_line({}) == "**?** · 进行中 0"
+        assert status_line({"model_id": "m", "in_flight": 2}) == "**m** · in flight 2"
+        assert status_line({}) == "**?** · in flight 0"
 
 
 class TestCurl:
@@ -552,7 +553,7 @@ class TestFormatError:
 
     def test_connection_error(self):
         exc = openai.APIConnectionError(request=httpx.Request("POST", "http://x"))
-        assert format_error(exc).startswith("无法连接 API: ")
+        assert format_error(exc).startswith("Cannot reach API: ")
 
     def test_generic(self):
         assert format_error(ValueError("bad")) == "ValueError: bad"
@@ -717,19 +718,19 @@ def test_iter_generate_cancelled_while_rendering_ends_with_that_image(sdk):
 
 class TestProgressText:
     def test_running(self):
-        assert progress_text({"n": 4, "done": 1}) == "⏳ 生成中 · 已完成 1/4"
-        assert progress_text({"n": 1, "done": 0}) == "⏳ 生成中 · 已完成 0/1"
+        assert progress_text({"n": 4, "done": 1}) == "Generating · 1/4 done"
+        assert progress_text({"n": 1, "done": 0}) == "Generating · 0/1 done"
 
     def test_cancelled(self):
-        assert progress_text({"n": 4, "done": 2, "cancelled": True}) == "⏹ 已取消 · 完成 2/4"
+        assert progress_text({"n": 4, "done": 2, "cancelled": True}) == "Cancelled · 2/4 done"
 
     def test_done_with_timings(self):
         meta = {"n": 2, "done": 2, "elapsed_server_seconds": 0.5, "elapsed_client_seconds": 0.75}
-        assert progress_text(meta) == "✅ 完成 · 2 张 · 服务端 0.5s / 总 0.8s"
+        assert progress_text(meta) == "Done · 2 images · server 0.5s / total 0.8s"
 
     def test_done_without_timings(self):
         assert (
-            progress_text({"n": 1, "done": 1, "elapsed_server_seconds": None}) == "✅ 完成 · 1 张"
+            progress_text({"n": 1, "done": 1, "elapsed_server_seconds": None}) == "Done · 1 image"
         )
 
 

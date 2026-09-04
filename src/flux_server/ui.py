@@ -38,7 +38,7 @@ QUALITY_CHOICES = ["auto", "low", "medium", "high", "standard", "hd"]
 FORMAT_CHOICES = ["png", "jpeg", "webp"]
 MAX_SEED = 2**32 - 1
 EDIT_PLACEHOLDER = "ref.png"
-PROMPT_HINT = "Shift+Enter 生成"
+PROMPT_HINT = "Shift+Enter to run"
 EXAMPLE_PROMPTS = [
     "A cat holding a sign that says hello world",
     "A cozy cabin in a snowy forest at dusk, warm light in the windows",
@@ -388,7 +388,7 @@ def format_error(exc: Exception) -> str:
             message = source.get("message") or message
         return f"HTTP {exc.status_code}: {message}"
     if isinstance(exc, openai.APIConnectionError):
-        return f"无法连接 API: {exc}"
+        return f"Cannot reach API: {exc}"
     return f"{type(exc).__name__}: {exc}"
 
 
@@ -396,14 +396,14 @@ def progress_text(meta: dict[str, Any]) -> str:
     """One-line run status shown under the buttons (persistent, unlike toasts)."""
     n, done = meta.get("n") or 0, meta.get("done") or 0
     if meta.get("cancelled"):
-        return f"⏹ 已取消 · 完成 {done}/{n}"
+        return f"Cancelled · {done}/{n} done"
     if done < n:
-        return f"⏳ 生成中 · 已完成 {done}/{n}"
+        return f"Generating · {done}/{n} done"
     server, client = meta.get("elapsed_server_seconds"), meta.get("elapsed_client_seconds")
     timing = ""
     if server is not None and client is not None:
-        timing = f" · 服务端 {server:.1f}s / 总 {client:.1f}s"
-    return f"✅ 完成 · {done} 张{timing}"
+        timing = f" · server {server:.1f}s / total {client:.1f}s"
+    return f"Done · {done} {'image' if done == 1 else 'images'}{timing}"
 
 
 def _item_path(item: Any) -> str | None:
@@ -447,7 +447,7 @@ def select_gallery_image(items: Any, index: Any) -> list[PIL.Image.Image]:
         i = 0
     url = _item_url(items[min(max(i, 0), len(items) - 1)])
     if url is None:
-        raise gr.Error("结果不可用，请重新生成")
+        raise gr.Error("Result unavailable, please generate again")
     return [decode_data_url(url)]
 
 
@@ -480,8 +480,10 @@ def status_line(health: dict[str, Any]) -> str:
         health.get("device"),
         health.get("dtype"),
         f"offload {health['offload']}" if health.get("offload") is not None else None,
-        f"默认 {health['default_steps']} 步" if health.get("default_steps") is not None else None,
-        f"进行中 {health.get('in_flight', 0)}",
+        f"default {health['default_steps']} steps"
+        if health.get("default_steps") is not None
+        else None,
+        f"in flight {health.get('in_flight', 0)}",
     ]
     return " · ".join(str(part) for part in parts if part)
 
@@ -522,17 +524,18 @@ def _controls(settings: Settings, size_default: str) -> list[Any]:
             value=size_default,
             label="size",
             allow_custom_value=True,
-            info="可直接输入 WxH（16 的倍数）；auto = 默认 / 参考图尺寸；custom = 用下方宽高",
+            info="Type WxH directly (multiples of 16); auto = default / reference size; "
+            "custom = width/height below",
         )
         quality = gr.Dropdown(
             QUALITY_CHOICES,
             value="auto",
             label="quality",
             allow_custom_value=True,
-            info=f"steps=0 时决定步数：{quality_map}",
+            info=f"Determines the step count when steps=0: {quality_map}",
         )
         output_format = gr.Radio(FORMAT_CHOICES, value="png", label="output_format")
-    with gr.Accordion("高级参数", open=False):
+    with gr.Accordion("Advanced", open=False):
         with gr.Row():
             steps = gr.Slider(
                 0,
@@ -540,7 +543,7 @@ def _controls(settings: Settings, size_default: str) -> list[Any]:
                 value=settings.default_steps,
                 step=1,
                 label="steps",
-                info="0 = 由 quality 决定",
+                info="0 = determined by quality",
             )
             seed = gr.Number(
                 value=-1,
@@ -548,16 +551,21 @@ def _controls(settings: Settings, size_default: str) -> list[Any]:
                 minimum=-1,
                 maximum=MAX_SEED,
                 label="seed",
-                info="-1 随机；n>1 时依次 +1",
+                info="-1 = random; with n>1 the seed increments by 1 per image",
             )
             n = gr.Slider(
-                1, settings.max_n, value=1, step=1, label="n", info="逐张返回，完成一张即显示"
+                1,
+                settings.max_n,
+                value=1,
+                step=1,
+                label="n",
+                info="Images are returned one by one and shown as they finish",
             )
-        with gr.Accordion("自定义尺寸（size=custom 时生效）", open=False), gr.Row():
+        with gr.Accordion("Custom size (used when size=custom)", open=False), gr.Row():
             width = gr.Slider(256, 2048, value=1024, step=16, label="width")
             height = gr.Slider(256, 2048, value=1024, step=16, label="height")
         output_compression = gr.Slider(
-            0, 100, value=100, step=1, label="output_compression", info="仅 jpeg / webp"
+            0, 100, value=100, step=1, label="output_compression", info="jpeg / webp only"
         )
     return [size, width, height, quality, steps, seed, n, output_format, output_compression]
 
@@ -566,7 +574,7 @@ def _result_components(
     action_label: str,
 ) -> tuple[gr.JSON, gr.JSON, gr.Code, gr.Gallery, gr.Button]:
     gallery = gr.Gallery(
-        label="结果",
+        label="Results",
         columns=2,
         height=640,
         object_fit="contain",
@@ -575,11 +583,11 @@ def _result_components(
     )
     with gr.Row():
         action = gr.Button(action_label, variant="secondary")
-    with gr.Accordion("请求 / 响应详情", open=False):
+    with gr.Accordion("Request / response details", open=False):
         with gr.Row():
-            req_meta = gr.JSON(label="请求参数（随表单实时更新）")
-            resp_meta = gr.JSON(label="响应元数据（随生成进度更新）")
-        curl = gr.Code(language="shell", label="等价 curl", interactive=False)
+            req_meta = gr.JSON(label="Request (live from form)")
+            resp_meta = gr.JSON(label="Response metadata (updates with progress)")
+        curl = gr.Code(language="shell", label="Equivalent curl", interactive=False)
     return req_meta, resp_meta, curl, gallery, action
 
 
@@ -621,7 +629,7 @@ def _on_select(evt: gr.SelectData) -> int:
 def _run_buttons(label: str) -> tuple[gr.Button, gr.Button, gr.State, gr.Markdown]:
     with gr.Row():
         run = gr.Button(label, variant="primary", scale=3)
-        cancel = gr.Button("取消", variant="stop", scale=1)
+        cancel = gr.Button("Cancel", variant="stop", scale=1)
     status = gr.Markdown("")
     return run, cancel, gr.State(""), status
 
@@ -662,12 +670,12 @@ def build_ui(settings: Settings) -> gr.Blocks:
                 yield items, meta, progress_text(meta)
         except openai.APIStatusError as exc:
             if error_code(exc) != "cancelled":
-                yield gr.skip(), gr.skip(), f"❌ {format_error(exc)}"
+                yield gr.skip(), gr.skip(), f"Error: {format_error(exc)}"
                 raise gr.Error(format_error(exc)) from exc
             meta = {**meta, "cancelled": True}
             yield items, meta, progress_text(meta)
         except Exception as exc:
-            yield gr.skip(), gr.skip(), f"❌ {format_error(exc)}"
+            yield gr.skip(), gr.skip(), f"Error: {format_error(exc)}"
             raise gr.Error(format_error(exc)) from exc
         finally:
             runs.pop(request_id, None)
@@ -689,7 +697,7 @@ def build_ui(settings: Settings) -> gr.Blocks:
     def on_edit(request_id, api_base, model, refs, editor, mask, strength, prompt, *controls):
         paths = gallery_paths(refs)
         if not paths:
-            raise gr.Error("请至少上传一张参考图")
+            raise gr.Error("Upload at least one reference image")
         base = normalize_api_base(api_base, default_base)
         p = _params(prompt, *controls, model=model, strength=strength)
         request_id = request_id or uuid.uuid4().hex
@@ -715,7 +723,7 @@ def build_ui(settings: Settings) -> gr.Blocks:
 
     def on_cancel(api_base, request_id):
         if not request_id:
-            gr.Warning("还没有发起过生成")
+            gr.Warning("No generation has been started")
             return gr.skip()
         if request_id in runs:
             runs[request_id] = True  # covers the gap between two n=1 requests
@@ -725,10 +733,10 @@ def build_ui(settings: Settings) -> gr.Blocks:
         except Exception as exc:
             raise gr.Error(format_error(exc)) from exc
         if cancelled:
-            return "⏹ 已请求取消，将在当前去噪步结束后停止…"
+            return "Cancel requested; stops after the current denoising step…"
         if request_id in runs:
-            return "⏹ 已请求取消，将在当前这张完成后停止…"
-        gr.Warning("没有正在进行的生成（可能已完成）")
+            return "Cancel requested; stops after the current image…"
+        gr.Warning("No generation in progress (it may have finished)")
         return gr.skip()
 
     def on_refresh(api_base):
@@ -750,49 +758,51 @@ def build_ui(settings: Settings) -> gr.Blocks:
             return status_line(root.get("/health", cast_to=dict[str, Any]))
         except openai.APIStatusError as exc:
             if exc.status_code == 503:
-                return "⏳ 模型加载中…"
-            return f"⚠ {format_error(exc)}"
+                return "Loading model…"
+            return f"Warning: {format_error(exc)}"
         except Exception as exc:
-            return f"⚠ {format_error(exc)}"
+            return f"Warning: {format_error(exc)}"
 
     def on_send(items, index):
         return select_gallery_image(items, index), gr.Tabs(selected="edit")
 
     with gr.Blocks(
-        title="FLUX.2 [klein] 4B 调试台", analytics_enabled=False, fill_width=True
+        title="FLUX.2 [klein] 4B Playground", analytics_enabled=False, fill_width=True
     ) as demo:
         with gr.Row():
-            gr.Markdown("# FLUX.2 [klein] 4B 调试台", scale=1)
+            gr.Markdown("# FLUX.2 [klein] 4B Playground", scale=1)
             status_md = gr.Markdown("", scale=1)
-        with gr.Accordion("连接（API base / model）", open=False), gr.Row():
+        with gr.Accordion("Connection (API base / model)", open=False), gr.Row():
             api_base = gr.Textbox(
                 value=default_base,
                 label="API base",
-                info="所有请求与 curl 示例使用的地址，可改为远程服务",
+                info="Used by every request and curl example; "
+                "point it at a remote server if needed",
                 scale=2,
             )
             model = gr.Textbox(
                 value=default_model,
                 label="model",
-                info="请求中的 model 字段，服务端不校验（可填 gpt-image-1 测试兼容性）",
+                info="model field sent in requests; not validated by the server "
+                "(try gpt-image-1 to test compatibility)",
                 scale=1,
             )
         demo.load(on_status, inputs=api_base, outputs=status_md, api_name=False)
         api_base.change(on_status, inputs=api_base, outputs=status_md, api_name=False)
 
         with gr.Tabs() as tabs:
-            with gr.Tab("文生图", id="generate"), gr.Row():
+            with gr.Tab("Text to Image", id="generate"), gr.Row():
                 with gr.Column(scale=1, min_width=380):
                     prompt = gr.Textbox(
                         value=EXAMPLE_PROMPTS[0], lines=3, label="prompt", info=PROMPT_HINT
                     )
-                    buttons = _run_buttons("生成")
+                    buttons = _run_buttons("Generate")
                     controls = _controls(settings, "1024x1024")
                     gr.Examples(
-                        [[p] for p in EXAMPLE_PROMPTS], inputs=[prompt], label="示例 prompt"
+                        [[p] for p in EXAMPLE_PROMPTS], inputs=[prompt], label="Example prompts"
                     )
                 with gr.Column(scale=1, min_width=480):
-                    *outputs, gallery, send = _result_components("发送到图生图")
+                    *outputs, gallery, send = _result_components("Send to Image to Image")
                     sel = gr.State(0)
                 inputs = [api_base, model, prompt, *controls]
                 _bind(
@@ -808,10 +818,10 @@ def build_ui(settings: Settings) -> gr.Blocks:
                 )
                 gallery.select(_on_select, None, sel, api_name=False)
 
-            with gr.Tab("图生图", id="edit"), gr.Row():
+            with gr.Tab("Image to Image", id="edit"), gr.Row():
                 with gr.Column(scale=1, min_width=380):
                     refs = gr.Gallery(
-                        label="参考图（可多张，顺序即 image[] 顺序）",
+                        label="Reference images (multiple allowed; order = image[] order)",
                         interactive=True,
                         type="filepath",
                         file_types=["image"],
@@ -821,9 +831,12 @@ def build_ui(settings: Settings) -> gr.Blocks:
                         format="png",  # results are fed back as PIL images; keep them lossless
                     )
                     first_ref_state = gr.State(None)
-                    with gr.Accordion("局部重绘：在第一张图上涂抹要重绘的区域（可选）", open=False):
+                    with gr.Accordion(
+                        "Inpainting: paint the area to repaint on the first image (optional)",
+                        open=False,
+                    ):
                         editor = gr.ImageEditor(
-                            label="mask 画板",
+                            label="Mask canvas",
                             type="pil",
                             image_mode="RGBA",
                             sources=(),  # background is set from the refs gallery only
@@ -836,12 +849,13 @@ def build_ui(settings: Settings) -> gr.Blocks:
                             ),
                             eraser=gr.Eraser(default_size=40),
                             height=420,
-                            placeholder="先上传参考图，画板会自动载入第一张",
+                            placeholder="Upload a reference image first; "
+                            "the canvas loads the first one automatically",
                         )
                         mask = gr.File(
                             file_count="single",
                             file_types=["image"],
-                            label="或上传 mask 文件（透明 / 白色 = 重绘）",
+                            label="Or upload a mask file (transparent / white = repaint)",
                         )
                     with gr.Row():
                         strength = gr.Slider(
@@ -850,12 +864,15 @@ def build_ui(settings: Settings) -> gr.Blocks:
                             value=0,
                             step=0.05,
                             label="strength",
-                            info="0 = 不启用（原生多图编辑）；>0 = 以第一张图为底图重绘的程度，"
-                            "细粒度约为 1/steps；mask/strength 模式下 size 必须为 auto",
+                            info="0 = off (native multi-image editing); >0 = how far to move "
+                            "away from the first image, granularity about 1/steps; "
+                            "size must be auto in mask/strength mode",
                         )
                     gr.Markdown(
-                        "局部重绘：画板上涂抹的区域优先于上传的 mask 文件（文件：透明区域 = 重绘，"
-                        "无透明通道时白色 = 重绘）；第二张图作为重绘区域的参考；size 需为 auto。"
+                        "Inpainting: the painted area takes precedence over an uploaded mask "
+                        "file (file: transparent area = repaint; without an alpha channel, "
+                        "white = repaint); the second image is the reference for the repainted "
+                        "area; size must be auto."
                     )
                     edit_prompt = gr.Textbox(
                         value="make it a snowy winter scene",
@@ -863,10 +880,12 @@ def build_ui(settings: Settings) -> gr.Blocks:
                         label="prompt",
                         info=PROMPT_HINT,
                     )
-                    edit_buttons = _run_buttons("编辑")
+                    edit_buttons = _run_buttons("Edit")
                     edit_controls = _controls(settings, "auto")
                 with gr.Column(scale=1, min_width=480):
-                    *edit_outputs, edit_gallery, reuse = _result_components("用选中结果继续编辑")
+                    *edit_outputs, edit_gallery, reuse = _result_components(
+                        "Continue editing with selected result"
+                    )
                     edit_sel = gr.State(0)
                 edit_inputs = [
                     api_base,
@@ -905,9 +924,9 @@ def build_ui(settings: Settings) -> gr.Blocks:
                     preprocess=False,  # raw gallery dicts; data URLs must not be fetched/cached
                 )
 
-            with gr.Tab("状态", id="status"):
-                refresh = gr.Button("刷新")
-                status = gr.JSON(label="状态")
+            with gr.Tab("Status", id="status"):
+                refresh = gr.Button("Refresh")
+                status = gr.JSON(label="Status")
                 refresh.click(on_refresh, inputs=api_base, outputs=status, api_name="status")
 
         send.click(on_send, [gallery, sel], [refs, tabs], api_name=False, preprocess=False)

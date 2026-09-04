@@ -68,8 +68,8 @@ curl -s http://127.0.0.1:8000/v1/images/edits \
 - A second `image[]` entry becomes the reference for the repainted area (at most one extra
   image in this mode). `size` must stay `auto` — the output follows the first image
   (downscaled to ≤ 1 MP, multiples of 16).
-- In the debug UI the mask can be painted directly on the first reference image (图生图 →
-  **局部重绘** accordion) instead of uploading a file.
+- In the debug UI the mask can be painted directly on the first reference image (Image to
+  Image → **Inpainting** accordion) instead of uploading a file.
 
 ### Cancelling a generation
 
@@ -90,42 +90,42 @@ cancelled the same way automatically, so a queued job never runs for nobody. Wit
 `openai` SDK: `client.images.generate(..., extra_headers={"X-Request-Id": "job-42"})`.
 `/health` reports the number of `in_flight` requests.
 
-## 调试页面 / Debug UI
+## Debug UI
 
 Open <http://127.0.0.1:8000/ui> (`/` redirects there). The header shows a live status line
 from `/health` (model, device, dtype, offload, default steps, in-flight requests; refreshed
-when the API base changes). Tabs: **文生图** (text-to-image), **图生图** (multi-reference
-editing), **状态** (`/health` and `/v1/models`). The page runs in the server process but
+when the API base changes). Tabs: **Text to Image**, **Image to Image** (multi-reference
+editing), **Status** (`/health` and `/v1/models`). The page runs in the server process but
 talks to the `/v1` API through the official `openai` Python SDK, so it doubles as an
 end-to-end API check. Each tab is two columns: the left has the prompt (**Shift+Enter**
-submits), the **生成 / 编辑** and **取消** buttons, the basic parameters (`size`, `quality`,
-`output_format`) and a collapsed **高级参数** accordion (`steps`, `seed`, `n`, custom
-width/height for `size=custom`, `output_compression` for jpeg/webp); the 文生图 tab also
-offers a few clickable example prompts. The right column is the result gallery with a
-collapsed **请求 / 响应详情** accordion below it: the request parameters and the equivalent
-`curl` command update live as you edit the form (no need to wait for a generation), and the
-response metadata (seeds, timings) fills in as the generation progresses. With `n > 1` the
-page sends one `n=1` request per image, chaining seeds `s, s+1, …` exactly as the server
-does internally for a single `n` request (so the images are identical), and shows each
-image as soon as it finishes. Result images are returned to the browser inline (base64 data
-URLs, byte-exact API output in the chosen `output_format`) — nothing is written to disk or
-kept on the server, and the gallery's download button saves them as `seed-<n>.<ext>`. A
-status line under the buttons tracks the run (`生成中 ·
-已完成 1/4`, `完成 · 4 张 · 服务端 57.3s / 总 58.0s`, …); **取消** cancels the run in
-progress through the cancel endpoint — the current image stops at the end of its current
-denoising step (up to one step of latency, e.g. ~15 s at 1024² on an M1 Max) and no further
-images are started; the line then reads `已取消 · 完成 k/n`. Reference images for 图生图 are
-dropped into a
-gallery (its order is the `image[]` order); **发送到图生图** under the 文生图 results puts
-the selected image there and switches tabs, and **用选中结果继续编辑** on the 图生图 tab
-feeds the selected result back as the sole reference. The collapsed **局部重绘** accordion
-under the reference gallery holds a paint canvas (`gr.ImageEditor`) that loads the first
-reference automatically: brush over the area to repaint and it is sent as the `mask`
-(painted area = repaint); a mask file can still be uploaded there instead, but a non-empty
-painting always wins over the file. The **API base** and **model**
-fields in the collapsed **连接** accordion apply to every request, so the page can drive a
-remote server or send `model=gpt-image-1` to test client compatibility. `FLUX_UI=0`
-disables the page; `FLUX_UI_API_BASE` sets the default API base.
+submits), the **Generate / Edit** and **Cancel** buttons, the basic parameters (`size`,
+`quality`, `output_format`) and a collapsed **Advanced** accordion (`steps`, `seed`, `n`,
+custom width/height for `size=custom`, `output_compression` for jpeg/webp); the Text to
+Image tab also offers a few clickable example prompts. The right column is the result
+gallery with a collapsed **Request / response details** accordion below it: the request
+parameters and the equivalent `curl` command update live as you edit the form (no need to
+wait for a generation), and the response metadata (seeds, timings) fills in as the
+generation progresses. With `n > 1` the page sends one `n=1` request per image, chaining
+seeds `s, s+1, …` exactly as the server does internally for a single `n` request (so the
+images are identical), and shows each image as soon as it finishes. Result images are
+returned to the browser inline (base64 data URLs, byte-exact API output in the chosen
+`output_format`) — nothing is written to disk or kept on the server, and the gallery's
+download button saves them as `seed-<n>.<ext>`. A status line under the buttons tracks the
+run (`Generating · 1/4 done`, `Done · 4 images · server 57.3s / total 58.0s`, …);
+**Cancel** cancels the run in progress through the cancel endpoint — the current image
+stops at the end of its current denoising step (up to one step of latency, e.g. ~15 s at
+1024² on an M1 Max) and no further images are started; the line then reads
+`Cancelled · k/n done`. Reference images for Image to Image are dropped into a gallery (its
+order is the `image[]` order); **Send to Image to Image** under the Text to Image results
+puts the selected image there and switches tabs, and **Continue editing with selected
+result** on the Image to Image tab feeds the selected result back as the sole reference.
+The collapsed **Inpainting** accordion under the reference gallery holds a paint canvas
+(`gr.ImageEditor`) that loads the first reference automatically: brush over the area to
+repaint and it is sent as the `mask` (painted area = repaint); a mask file can still be
+uploaded there instead, but a non-empty painting always wins over the file. The **API base**
+and **model** fields in the collapsed **Connection** accordion apply to every request, so
+the page can drive a remote server or send `model=gpt-image-1` to test client
+compatibility. `FLUX_UI=0` disables the page; `FLUX_UI_API_BASE` sets the default API base.
 
 `scripts/smoke_openai_sdk.py` runs the same generate + edit flow from the command line
 against a running server (`--base-url`, `--image`, `--skip-edit`; images land in `--out-dir`).
