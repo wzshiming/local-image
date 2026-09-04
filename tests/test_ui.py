@@ -42,6 +42,7 @@ from flux_server.ui import (
     progress_text,
     request_preview,
     resolve_size,
+    retry_unstable_upload,
     run_edit,
     run_generate,
     select_gallery_image,
@@ -177,6 +178,7 @@ def test_build_ui_constructs_without_server():
     assert all(type(g) is gr.Gallery for g in galleries)  # no Component subclass (no .pyi stub)
     editors = [b for b in blocks if isinstance(b, gr.ImageEditor)]
     assert len(editors) == 1 and editors[0].sources == () and editors[0].type == "pil"
+    assert editors[0].preprocess.__name__ == "retrying_preprocess"  # tolerates in-flight uploads
     fns = list(demo.fns.values())
     api_names = {fn.api_name for fn in fns}
     assert {"generate", "edit", "status"} <= api_names
@@ -241,6 +243,46 @@ class TestMaskFromEditor:
         assert mask is not None
         assert mask.getpixel((5, 5)) == 255 and mask.getpixel((60, 60)) == 255
         assert mask.getpixel((30, 30)) == 0
+
+
+class TestRetryUnstableUpload:
+    """Gradio finishes copying a re-uploaded file after the event fires (Windows rename race)."""
+
+    def test_retries_transient_image_errors(self, monkeypatch):
+        sleeps: list[float] = []
+        monkeypatch.setattr("flux_server.ui.time.sleep", sleeps.append)
+        errors = [SyntaxError("broken PNG file (chunk b'x')"), OSError("image file is truncated")]
+
+        def flaky(payload):
+            if errors:
+                raise errors.pop(0)
+            return {"ok": payload}
+
+        wrapped = retry_unstable_upload(flaky)
+        assert wrapped("p") == {"ok": "p"}
+        assert len(sleeps) == 2 and all(s > 0 for s in sleeps)
+
+    def test_gives_up_after_retries(self, monkeypatch):
+        monkeypatch.setattr("flux_server.ui.time.sleep", lambda _s: None)
+        calls = 0
+
+        def broken(_payload):
+            nonlocal calls
+            calls += 1
+            raise SyntaxError("broken PNG file")
+
+        with pytest.raises(SyntaxError):
+            retry_unstable_upload(broken, attempts=3)(None)
+        assert calls == 3
+
+    def test_other_errors_propagate_immediately(self, monkeypatch):
+        monkeypatch.setattr("flux_server.ui.time.sleep", lambda _s: pytest.fail("slept"))
+
+        def bad(_payload):
+            raise ValueError("nope")
+
+        with pytest.raises(ValueError):
+            retry_unstable_upload(bad)(None)
 
 
 def test_write_temp_mask_round_trips_through_server(sdk, tmp_path: Path):

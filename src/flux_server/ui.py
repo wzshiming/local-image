@@ -473,6 +473,28 @@ def write_temp_mask(mask: PIL.Image.Image) -> str:
         return f.name
 
 
+def retry_unstable_upload(
+    preprocess: Callable[[Any], Any], attempts: int = 10, delay: float = 0.05
+) -> Callable[[Any], Any]:
+    """Retry a component preprocess while Gradio is still (re)writing the uploaded file.
+
+    Re-uploading identical content (the editor's unchanged background) makes Gradio's
+    ``/upload`` fall back to a copy that runs as a background task after the response on
+    Windows, so the event can read a half-written PNG (PIL SyntaxError / truncated OSError).
+    """
+
+    def retrying_preprocess(payload: Any) -> Any:
+        for attempt in range(1, attempts + 1):
+            try:
+                return preprocess(payload)
+            except (SyntaxError, OSError):  # UnidentifiedImageError / truncated is OSError
+                if attempt == attempts:
+                    raise
+                time.sleep(delay * attempt)
+
+    return retrying_preprocess
+
+
 def status_line(health: dict[str, Any]) -> str:
     model = health.get("model_id") or health.get("model") or "?"
     parts: list[str | None] = [
@@ -852,6 +874,7 @@ def build_ui(settings: Settings) -> gr.Blocks:
                             placeholder="Upload a reference image first; "
                             "the canvas loads the first one automatically",
                         )
+                        editor.preprocess = retry_unstable_upload(editor.preprocess)  # type: ignore[method-assign]
                         mask = gr.File(
                             file_count="single",
                             file_types=["image"],
